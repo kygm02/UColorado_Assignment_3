@@ -1,15 +1,16 @@
 # Default compiler and flags
-CC = $(CROSS_COMPILE)gcc
-CFLAGS = -Wall -Werror
-TARGET = aesdsocket
-SRC = aesdsocket.c
-OBJ = $(SRC:.c=.o)
+CC ?= $(CROSS_COMPILE)gcc
+CFLAGS ?= -Wall -Werror
+LDFLAGS ?= -lpthread
+TARGET ?= aesdsocket
+SRC ?= aesdsocket.c
+OBJ ?= $(SRC:.c=.o)
 
 # Default target: builds the "aesdsocket" application
 all: $(TARGET)
 
 $(TARGET): $(OBJ)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJ) $(LDFLAGS)
 
 # Pattern rule for object files
 %.o: %.c
