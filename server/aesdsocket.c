@@ -16,6 +16,7 @@
 #include <stdbool.h>
 #include <time.h>
 #include <sys/queue.h>
+#include <sched.h>
 
 #define PORT        9000
 #define DATAFILE    "/var/tmp/aesdsocketdata"
@@ -57,7 +58,7 @@ void *connection_handler(void *arg)
     int fd = node->client_fd;
     unsigned char *ip = (unsigned char *)&node->cli_addr.sin_addr.s_addr;
 
-    /* Receive until newline */
+    /* Receive until newline or connection closed */
     size_t buf_size = 256, buf_used = 0;
     char *dynbuf = malloc(buf_size);
     if (!dynbuf) { syslog(LOG_ERR, "malloc failed"); goto done; }
@@ -92,11 +93,9 @@ void *connection_handler(void *arg)
 
     if (written < 0) { syslog(LOG_ERR, "write failed"); goto done; }
 
-    /* Send full file back */
-    pthread_mutex_lock(&file_mutex);
+    /* Send full file back - no mutex held during send */
     int rfd = open(DATAFILE, O_RDONLY);
     if (rfd < 0) {
-        pthread_mutex_unlock(&file_mutex);
         syslog(LOG_ERR, "open for read failed");
         goto done;
     }
@@ -105,13 +104,11 @@ void *connection_handler(void *arg)
     while ((bytes = read(rfd, filebuf, sizeof(filebuf))) > 0) {
         if (write(fd, filebuf, bytes) < 0) {
             close(rfd);
-            pthread_mutex_unlock(&file_mutex);
             syslog(LOG_ERR, "send failed");
             goto done;
         }
     }
     close(rfd);
-    pthread_mutex_unlock(&file_mutex);
 
     syslog(LOG_DEBUG, "Closed connection from %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3]);
 
@@ -133,7 +130,6 @@ void *timer_handler(void *arg)
         time_t t = time(NULL);
         struct tm *tm_info = localtime(&t);
         char tsbuf[128];
-        /* RFC 2822: "timestamp:Www, DD Mon YYYY HH:MM:SS +0000\n" */
         strftime(tsbuf, sizeof(tsbuf), "timestamp:%a, %d %b %Y %T %z\n", tm_info);
 
         pthread_mutex_lock(&file_mutex);
@@ -223,7 +219,11 @@ int main(int argc, char *argv[])
             SLIST_REMOVE_HEAD(&thread_head, entries);
             close(newsockfd);
             free(node);
+            continue;
         }
+
+        /* Yield to let the new thread get scheduled before we loop back */
+        sched_yield();
 
         /* Reap completed threads */
         thread_node_t *cur, *tmp;
